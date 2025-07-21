@@ -1,0 +1,18 @@
+services:
+  hunyuan:
+    container_name: hunyuan
+    build:
+      ssh: ["default"]
+    volumes:
+      - .:/workspaces
+      - "${MODEL_CACHE}:/root/.cache/huggingface"
+    ports:
+      - 16000:8080
+    entrypoint: ["/bin/bash", "-c", "while true; do sleep 30; done;"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
