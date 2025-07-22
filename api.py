@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from mmgp import offload
 from PIL import Image
+from pydantic import BaseModel, Field
 
 from hy3dgen.rembg import BackgroundRemover
 from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline
@@ -34,6 +35,32 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("api")
+
+
+class MeshGenerationParams(BaseModel):
+    text: str = Field(None, description="Text prompt for text-to-image generation (if enabled)")
+    image: str = Field(
+        None,
+        description="Base64 encoded image for background removal and mesh generation",
+    )
+    seed: int = Field(1234, description="Random seed for reproducibility")
+    octree_resolution: int = Field(256, description="Octree resolution for mesh generation")
+    num_inference_steps: int = Field(
+        5, description="Number of inference steps for mesh generation"
+    )
+    guidance_scale: float = Field(5.0, description="Guidance scale for mesh generation")
+    mc_algo: str = Field("dmc", description="Algorithm for mesh generation")
+    num_chunks: int = Field(
+        8000, description="Number of chunks for mesh generation (if applicable)"
+    )
+    target_face_num: int = Field(10000, description="Target number of faces for mesh generation")
+    texture: bool = Field(
+        False, description="Whether to generate texture for the mesh (if enabled)"
+    )
+    save_type: str = Field(
+        "glb",
+        description="File format for saving the generated mesh (e.g., 'glb', 'obj', 'ply')",
+    )
 
 
 def load_image_from_base64(image: str) -> Image.Image:
@@ -121,10 +148,10 @@ class ModelWorker:
         offload.profile(pipe, profile_no=profile, verboseLevel=int(verbose), **kwargs)
 
     @torch.inference_mode()
-    def generate(self, uid: str, params: dict) -> str:
-        if "image" in params:
-            image = load_image_from_base64(params["image"])
-        elif self.enable_text and "text" in params:
+    def generate(self, uid: str, params: MeshGenerationParams) -> str:
+        if params.image:
+            image = load_image_from_base64(params.image)
+        elif self.enable_text and params.text:
             text = params["text"]
             logger.info(f"Generating image from text: {text}")
             image = self.t2i_worker(text)
@@ -132,18 +159,21 @@ class ModelWorker:
             raise ValueError("No input image or text provided")
 
         image = self.rembg(image)
-        params["image"] = image
+        params.image = image
 
-        seed = params.get("seed", 1234)
-        params["generator"] = torch.Generator(self.device).manual_seed(seed)
-        params["octree_resolution"] = params.get("octree_resolution", 128)
-        params["num_inference_steps"] = params.get("num_inference_steps", 5)
-        params["guidance_scale"] = params.get("guidance_scale", 5.0)
-        params["mc_algo"] = "dmc"
+        seed_generator = torch.Generator(self.device).manual_seed(params.seed)
 
-        mesh = self.i23d_worker(**params)[0]
+        mesh = self.i23d_worker(
+            image=image,
+            num_inference_steps=params.num_inference_steps,
+            generator=seed_generator,
+            octree_resolution=params.octree_resolution,
+            guidance_scale=params.guidance_scale,
+            mc_algo=params.mc_algo,
+            num_chunks=params.num_chunks,
+        )[0]
 
-        if self.enable_tex and params.get("texture", False):
+        if self.enable_tex and params.texture:
             from hy3dgen.shapegen import (
                 DegenerateFaceRemover,
                 FaceReducer,
@@ -152,10 +182,10 @@ class ModelWorker:
 
             mesh = FloaterRemover()(mesh)
             mesh = DegenerateFaceRemover()(mesh)
-            mesh = FaceReducer()(mesh, max_facenum=params.get("face_count", 40000))
+            mesh = FaceReducer()(mesh, max_facenum=params.target_face_num)
             mesh = self.texgen_worker(mesh, image)
 
-        type = params.get("type", "glb")
+        type = params.save_type
         save_path = os.path.join(SAVE_DIR, f"{uid}.{type}")
         with tempfile.NamedTemporaryFile(suffix=f".{type}", delete=True) as temp_file:
             mesh.export(temp_file.name)
@@ -183,9 +213,8 @@ class ModelWorker:
 
 
 @app.post("/generate")
-async def generate(request: Request):
+async def generate(params: MeshGenerationParams):
     logger.info("Processing /generate request...")
-    params = await request.json()
     uid = str(uuid.uuid4())
     try:
         async with model_semaphore:
