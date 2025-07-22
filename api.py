@@ -39,11 +39,11 @@ logger = logging.getLogger("api")
 
 class MeshGenerationParams(BaseModel):
     text: str = Field(None, description="Text prompt for text-to-image generation (if enabled)")
-    image: str = Field(
+    image: str | None = Field(
         None,
         description="Base64 encoded image for background removal and mesh generation",
     )
-    seed: int = Field(1234, description="Random seed for reproducibility")
+    seed: int | None = Field(None, description="Random seed for reproducibility")
     octree_resolution: int = Field(256, description="Octree resolution for mesh generation")
     num_inference_steps: int = Field(
         5, description="Number of inference steps for mesh generation"
