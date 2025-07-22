@@ -152,7 +152,7 @@ class ModelWorker:
         if params.image:
             image = load_image_from_base64(params.image)
         elif self.enable_text and params.text:
-            text = params["text"]
+            text = params.text
             logger.info(f"Generating image from text: {text}")
             image = self.t2i_worker(text)
         else:
