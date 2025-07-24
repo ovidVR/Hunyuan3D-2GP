@@ -149,12 +149,17 @@ class ModelWorker:
 
     @torch.inference_mode()
     def generate(self, uid: str, params: MeshGenerationParams) -> str:
+
+        if params.seed is None:
+            params.seed = int(uuid.uuid4().int % (2**32 - 1))
+            logger.info(f"Using random seed: {params.seed}")
+
         if params.image:
             image = load_image_from_base64(params.image)
         elif self.enable_text and params.text:
             text = params.text
             logger.info(f"Generating image from text: {text}")
-            image = self.t2i_worker(text)
+            image = self.t2i_worker(text, seed=params.seed)
         else:
             raise ValueError("No input image or text provided")
 
