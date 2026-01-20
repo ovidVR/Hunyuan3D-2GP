@@ -11,7 +11,7 @@ import torch
 import trimesh
 import typer
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from mmgp import offload
@@ -22,6 +22,8 @@ from hy3dgen.rembg import BackgroundRemover
 from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline
 
 app = FastAPI()
+router = APIRouter(prefix="/meshAPI/hunyuan")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -217,7 +219,7 @@ class ModelWorker:
         return None
 
 
-@app.post("/generate")
+@router.post("/generate")
 async def generate(params: MeshGenerationParams):
     logger.info("Processing /generate request...")
     uid = str(uuid.uuid4())
@@ -234,7 +236,7 @@ async def generate(params: MeshGenerationParams):
         return JSONResponse({"text": "Server error", "error_code": 1}, status_code=500)
 
 
-@app.post("/generate_image")
+@router.post("/generate_image")
 async def generate_image(request: Request):
     logger.info("Processing /generate request...")
     params = await request.json()
@@ -294,6 +296,7 @@ def main(
     )
     uvicorn.run(app, host=host, port=port, log_level="info")
 
+app.include_router(router)
 
 if __name__ == "__main__":
     typer.run(main)
